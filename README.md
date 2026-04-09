@@ -1,0 +1,2 @@
+# palettify
+Color palette generator
