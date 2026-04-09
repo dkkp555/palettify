@@ -1,0 +1,369 @@
+import { useState, useCallback } from "react";
+
+const QUICK_PROMPTS = [
+  { emoji: "🌅", label: "golden hour beach", value: "golden hour at the beach, warm amber and coral tones" },
+  { emoji: "📚", label: "dark academia", value: "dark academia library aesthetic, rich browns and deep greens" },
+  { emoji: "🌆", label: "cyberpunk rain", value: "neon cyberpunk city in the rain at night" },
+  { emoji: "🌸", label: "cottagecore", value: "soft cottagecore wildflower garden in spring" },
+  { emoji: "❄️", label: "scandi winter", value: "minimalist scandinavian winter, muted and icy" },
+  { emoji: "🏯", label: "medieval fantasy", value: "medieval fantasy castle at dusk, warm torchlight and stone" },
+];
+
+const ROLES_ORDER = ["background", "neutral", "primary", "secondary", "accent"];
+
+export default function Palettify() {
+  const [prompt, setPrompt] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [palette, setPalette] = useState(null);
+  const [error, setError] = useState("");
+  const [toast, setToast] = useState("");
+  const [hoveredIdx, setHoveredIdx] = useState(null);
+
+  const showToast = (msg) => {
+    setToast(msg);
+    setTimeout(() => setToast(""), 2000);
+  };
+
+  const copyText = (text, label) => {
+    navigator.clipboard.writeText(text).then(() => showToast(`✓ ${label} copied`));
+  };
+
+  const generate = useCallback(async (overridePrompt) => {
+    const p = overridePrompt ?? prompt;
+    if (!p.trim()) return;
+    setLoading(true);
+    setError("");
+    setPalette(null);
+
+    const system = `You are a professional color designer. Generate a cohesive 5-color palette based on the user's mood/aesthetic.
+Respond ONLY with valid JSON, no markdown, no backticks, no explanation.
+Format:
+{
+  "name": "Short evocative palette name (2-4 words)",
+  "description": "One vivid sentence describing the palette feeling (max 18 words)",
+  "colors": [
+    { "hex": "#RRGGBB", "name": "Color name", "role": "background|neutral|primary|secondary|accent" }
+  ],
+  "tips": ["Short design tip (max 12 words)", "tip2", "tip3"],
+  "moodWords": ["word1","word2","word3","word4","word5"]
+}
+Make sure the 5 colors are visually cohesive, vary in lightness, and authentically match the described mood.`;
+
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 1000,
+          system,
+          messages: [{ role: "user", content: `Generate palette for: "${p}"` }],
+        }),
+      });
+      const data = await res.json();
+      const raw = data.content?.map((b) => b.text || "").join("").trim();
+      const clean = raw.replace(/```json|```/g, "").trim();
+      const parsed = JSON.parse(clean);
+      setPalette(parsed);
+    } catch {
+      setError("Gagal generate palette. Coba lagi ya!");
+    } finally {
+      setLoading(false);
+    }
+  }, [prompt]);
+
+  const exportCSS = () => {
+    if (!palette) return;
+    const vars = palette.colors.map((c) => `  --${c.role}: ${c.hex}; /* ${c.name} */`).join("\n");
+    copyText(`:root {\n${vars}\n}`, "CSS variables");
+  };
+
+  const exportHex = () => {
+    if (!palette) return;
+    const hexes = palette.colors.map((c) => `${c.hex}  ${c.name}`).join("\n");
+    copyText(hexes, "HEX codes");
+  };
+
+  return (
+    <div style={{
+      minHeight: "100vh",
+      background: "#0c0c0f",
+      color: "#ede8e0",
+      fontFamily: "'DM Sans', system-ui, sans-serif",
+      padding: "0",
+      position: "relative",
+      overflow: "hidden",
+    }}>
+      {/* Ambient bg blobs */}
+      <div style={{
+        position: "fixed", top: -120, right: -80, width: 400, height: 400,
+        borderRadius: "50%", background: "radial-gradient(circle, rgba(180,140,80,0.07) 0%, transparent 70%)",
+        pointerEvents: "none",
+      }} />
+      <div style={{
+        position: "fixed", bottom: -100, left: -60, width: 350, height: 350,
+        borderRadius: "50%", background: "radial-gradient(circle, rgba(100,80,160,0.07) 0%, transparent 70%)",
+        pointerEvents: "none",
+      }} />
+
+      <div style={{ maxWidth: 720, margin: "0 auto", padding: "52px 20px 80px" }}>
+
+        {/* Header */}
+        <div style={{ marginBottom: 48 }}>
+          <div style={{
+            fontSize: 11, letterSpacing: "0.3em", textTransform: "uppercase",
+            color: "#c4963a", marginBottom: 16, fontWeight: 500,
+          }}>
+            Palettify ✦ AI Color Tool
+          </div>
+          <h1 style={{
+            fontSize: "clamp(2rem, 6vw, 3.2rem)",
+            fontWeight: 700,
+            lineHeight: 1.1,
+            marginBottom: 12,
+            letterSpacing: "-0.02em",
+          }}>
+            Generate{" "}
+            <span style={{ color: "#c4963a", fontStyle: "italic" }}>beautiful</span>
+            <br />color palettes
+          </h1>
+          <p style={{ color: "#6e6b78", fontSize: 15, fontWeight: 300, lineHeight: 1.6 }}>
+            Describe a mood, scene, or aesthetic — AI crafts a palette for your vision.
+          </p>
+        </div>
+
+        {/* Input */}
+        <div style={{
+          background: "#151518",
+          border: "1px solid #252530",
+          borderRadius: 16,
+          padding: 24,
+          marginBottom: 28,
+        }}>
+          <div style={{ fontSize: 11, letterSpacing: "0.18em", textTransform: "uppercase", color: "#5a5762", marginBottom: 12 }}>
+            Describe your vibe
+          </div>
+          <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+            <textarea
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); generate(); } }}
+              placeholder="e.g. misty mountain morning, retro Tokyo at night, cozy autumn café..."
+              style={{
+                flex: 1, background: "#0c0c0f", border: "1px solid #252530",
+                borderRadius: 10, padding: "12px 14px", color: "#ede8e0",
+                fontFamily: "inherit", fontSize: 15, resize: "none", height: 76,
+                outline: "none", lineHeight: 1.5, fontWeight: 300,
+                transition: "border-color 0.2s",
+              }}
+              onFocus={(e) => e.target.style.borderColor = "#c4963a"}
+              onBlur={(e) => e.target.style.borderColor = "#252530"}
+            />
+            <button
+              onClick={() => generate()}
+              disabled={loading || !prompt.trim()}
+              style={{
+                background: loading || !prompt.trim() ? "#2a2630" : "#c4963a",
+                color: loading || !prompt.trim() ? "#5a5762" : "#0c0c0f",
+                border: "none", borderRadius: 10, padding: "0 20px",
+                fontFamily: "inherit", fontSize: 14, fontWeight: 600,
+                cursor: loading || !prompt.trim() ? "not-allowed" : "pointer",
+                height: 76, minWidth: 100, transition: "all 0.2s",
+                letterSpacing: "0.02em",
+              }}
+            >
+              {loading ? "..." : "Generate"}
+            </button>
+          </div>
+
+          {/* Quick chips */}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 16 }}>
+            {QUICK_PROMPTS.map((q) => (
+              <button
+                key={q.value}
+                onClick={() => { setPrompt(q.value); generate(q.value); }}
+                style={{
+                  background: "transparent", border: "1px solid #252530",
+                  borderRadius: 100, padding: "5px 13px", fontSize: 12,
+                  color: "#6e6b78", cursor: "pointer", fontFamily: "inherit",
+                  transition: "all 0.2s",
+                }}
+                onMouseEnter={(e) => { e.target.style.borderColor = "#c4963a"; e.target.style.color = "#c4963a"; }}
+                onMouseLeave={(e) => { e.target.style.borderColor = "#252530"; e.target.style.color = "#6e6b78"; }}
+              >
+                {q.emoji} {q.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Error */}
+        {error && (
+          <div style={{
+            background: "rgba(200,80,80,0.08)", border: "1px solid rgba(200,80,80,0.25)",
+            borderRadius: 10, padding: "12px 16px", color: "#d07070", fontSize: 14, marginBottom: 20,
+          }}>
+            {error}
+          </div>
+        )}
+
+        {/* Loading skeleton */}
+        {loading && (
+          <div style={{ textAlign: "center", padding: "48px 0" }}>
+            <div style={{
+              width: 36, height: 36, border: "2px solid #252530",
+              borderTopColor: "#c4963a", borderRadius: "50%",
+              animation: "spin 0.8s linear infinite", margin: "0 auto 16px",
+            }} />
+            <div style={{ color: "#5a5762", fontSize: 14 }}>Crafting your palette...</div>
+            <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+          </div>
+        )}
+
+        {/* Result */}
+        {palette && !loading && (
+          <div>
+            {/* Name & desc */}
+            <div style={{ marginBottom: 24 }}>
+              <div style={{ fontSize: "1.6rem", fontWeight: 700, letterSpacing: "-0.02em", marginBottom: 6 }}>
+                {palette.name}
+              </div>
+              <div style={{ color: "#6e6b78", fontSize: 14, lineHeight: 1.6 }}>{palette.description}</div>
+            </div>
+
+            {/* Big swatch bar */}
+            <div style={{
+              display: "flex", borderRadius: 14, overflow: "hidden",
+              height: 160, marginBottom: 20,
+              boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
+            }}>
+              {palette.colors.map((c, i) => (
+                <div
+                  key={i}
+                  onClick={() => copyText(c.hex, c.hex)}
+                  onMouseEnter={() => setHoveredIdx(i)}
+                  onMouseLeave={() => setHoveredIdx(null)}
+                  style={{
+                    flex: hoveredIdx === i ? 1.8 : 1,
+                    background: c.hex,
+                    cursor: "pointer",
+                    transition: "flex 0.3s ease",
+                    display: "flex", alignItems: "flex-end", padding: "10px 10px",
+                    position: "relative",
+                  }}
+                >
+                  <div style={{
+                    opacity: hoveredIdx === i ? 1 : 0,
+                    transition: "opacity 0.2s",
+                    background: "rgba(0,0,0,0.45)",
+                    backdropFilter: "blur(6px)",
+                    borderRadius: 6, padding: "5px 9px", width: "100%",
+                  }}>
+                    <div style={{ fontSize: 12, fontFamily: "monospace", color: "#fff", fontWeight: 600 }}>{c.hex}</div>
+                    <div style={{ fontSize: 11, color: "rgba(255,255,255,0.7)", marginTop: 2 }}>{c.name}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Color cards */}
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(125px, 1fr))",
+              gap: 10, marginBottom: 24,
+            }}>
+              {palette.colors.map((c, i) => (
+                <div
+                  key={i}
+                  onClick={() => copyText(c.hex, c.hex)}
+                  style={{
+                    background: "#151518", border: "1px solid #252530",
+                    borderRadius: 12, padding: "14px 14px", cursor: "pointer",
+                    transition: "border-color 0.2s",
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.borderColor = "#c4963a"}
+                  onMouseLeave={(e) => e.currentTarget.style.borderColor = "#252530"}
+                >
+                  <div style={{
+                    width: 34, height: 34, borderRadius: "50%",
+                    background: c.hex, marginBottom: 10,
+                    boxShadow: "0 4px 12px rgba(0,0,0,0.35)",
+                  }} />
+                  <div style={{ fontSize: 12, fontFamily: "monospace", color: "#ede8e0", marginBottom: 3 }}>{c.hex}</div>
+                  <div style={{ fontSize: 12, color: "#6e6b78" }}>{c.name}</div>
+                  <div style={{ fontSize: 10, color: "#7c6baa", marginTop: 4, textTransform: "uppercase", letterSpacing: "0.05em" }}>{c.role}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Tips */}
+            <div style={{
+              background: "#151518", border: "1px solid #252530",
+              borderRadius: 14, padding: "20px 22px", marginBottom: 20,
+            }}>
+              <div style={{ fontSize: 11, letterSpacing: "0.2em", textTransform: "uppercase", color: "#c4963a", marginBottom: 14 }}>
+                Usage Tips
+              </div>
+              <ul style={{ listStyle: "none", display: "flex", flexDirection: "column", gap: 10 }}>
+                {palette.tips.map((t, i) => (
+                  <li key={i} style={{ fontSize: 14, color: "#6e6b78", lineHeight: 1.5, paddingLeft: 18, position: "relative" }}>
+                    <span style={{ position: "absolute", left: 0, color: "#c4963a" }}>—</span>
+                    {t}
+                  </li>
+                ))}
+              </ul>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 16 }}>
+                {palette.moodWords.map((w, i) => (
+                  <span key={i} style={{
+                    background: "rgba(124,107,170,0.12)", border: "1px solid rgba(124,107,170,0.25)",
+                    color: "#a89ccc", borderRadius: 100, padding: "4px 12px", fontSize: 12,
+                  }}>
+                    {w}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {/* Export row */}
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              {[
+                { label: "Copy CSS Variables", action: exportCSS },
+                { label: "Copy HEX Codes", action: exportHex },
+                { label: "↻ Regenerate", action: () => generate() },
+              ].map((btn) => (
+                <button
+                  key={btn.label}
+                  onClick={btn.action}
+                  style={{
+                    background: "transparent", border: "1px solid #252530",
+                    color: "#6e6b78", borderRadius: 8, padding: "9px 16px",
+                    fontFamily: "inherit", fontSize: 13, cursor: "pointer",
+                    transition: "all 0.2s",
+                  }}
+                  onMouseEnter={(e) => { e.target.style.borderColor = "#c4963a"; e.target.style.color = "#c4963a"; }}
+                  onMouseLeave={(e) => { e.target.style.borderColor = "#252530"; e.target.style.color = "#6e6b78"; }}
+                >
+                  {btn.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Toast */}
+      {toast && (
+        <div style={{
+          position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)",
+          background: "#c4963a", color: "#0c0c0f", padding: "10px 20px",
+          borderRadius: 100, fontSize: 13, fontWeight: 600,
+          boxShadow: "0 8px 24px rgba(0,0,0,0.4)", zIndex: 999,
+          animation: "fadeIn 0.3s ease",
+        }}>
+          {toast}
+          <style>{`@keyframes fadeIn { from { opacity:0; transform: translateX(-50%) translateY(8px); } to { opacity:1; transform: translateX(-50%) translateY(0); } }`}</style>
+        </div>
+      )}
+    </div>
+  );
+}
